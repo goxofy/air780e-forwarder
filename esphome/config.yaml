@@ -1,0 +1,178 @@
+substitutions:
+  pushover_token: !secret pushover_token
+  pushover_user: !secret pushover_user
+
+esphome:
+  name: air780e-sms
+  friendly_name: Air780E SMS
+
+esp32:
+  board: airm2m_core_esp32c3
+  framework:
+    type: arduino
+  
+
+#logger:
+#  level: INFO
+#  baud_rate: 115200
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # ap: none
+
+
+uart:
+  id: uart_bus
+  tx_pin: GPIO0
+  rx_pin: GPIO1
+  baud_rate: 115200
+  rx_buffer_size: 256
+
+
+http_request:
+  verify_ssl: false
+  timeout: 20s  # 增加超时时间
+  useragent: "C3-Air780E"
+
+text_sensor:
+  - platform: template
+    name: "收到的短信"
+    id: uart_text_sensor
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x != "" && x.substr(0, 13).compare("#ALIVE_REPORT") != 0;'
+            then:
+              - http_request.post:
+                  url: 'https://api.pushover.net/1/messages.json'
+                  request_headers:
+                    Content-Type: 'application/json'
+                  body: !lambda |-
+                    std::string msg = id(uart_text_sensor).state;
+                    std::string esc;
+                    for (char c : msg) {
+                      switch (c) {
+                        case '"':  esc += "\\\""; break;
+                        case '\\': esc += "\\\\"; break;
+                        case '\n': esc += "\\n";  break;
+                        case '\r': esc += "\\r";  break;
+                        case '\t': esc += "\\t";  break;
+                        default:
+                          if ((unsigned char)c < 0x20) {
+                            char buf[8];
+                            snprintf(buf, sizeof(buf), "\\u%04x", c);
+                            esc += buf;
+                          } else {
+                            esc += c;
+                          }
+                      }
+                    }
+                    return "{\"token\": \"${pushover_token}\", \"user\": \"${pushover_user}\", \"message\": \"" + esc + "\"}";
+      # Set reset timer when new value is received
+        - lambda: |-
+            if (!x.empty()) {
+              id(last_uart_read) = millis();
+              id(reset_timer) = true;
+            }
+
+# Define global variables
+globals:
+  - id: message_buffer
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+  - id: utf8_temp
+    type: std::vector<uint8_t>
+    restore_value: no
+    initial_value: 'std::vector<uint8_t>()'
+
+  - id: last_uart_read
+    type: unsigned long
+    restore_value: no
+    initial_value: '0'
+
+  - id: reset_timer
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          while (id(uart_bus).available()) {
+              id(last_uart_read) = millis();
+              uint8_t byte;
+              id(uart_bus).read_byte(&byte);
+              // Add byte to buffer
+              id(utf8_temp).push_back(byte);
+              // Check if the current byte suggests the end of a UTF-8 character sequence
+              if ((byte & 0x80) == 0 || (byte & 0xC0) == 0xC0) {
+                if ((byte & 0xC0) == 0xC0) {
+                  // Start of a new UTF-8 character sequence
+                  if (!id(utf8_temp).empty()) {
+                      std::string utf8_str(id(utf8_temp).begin(), id(utf8_temp).end() - 1);
+                      id(message_buffer) += utf8_str;
+                      id(utf8_temp).clear();
+                      id(utf8_temp).push_back(byte);
+                  }
+                } else {
+                  std::string utf8_str(id(utf8_temp).begin(), id(utf8_temp).end());
+                  id(message_buffer) += utf8_str;
+                  id(utf8_temp).clear();
+                }
+              }
+          }
+          // Check for 2-second reset logic
+          if (id(reset_timer) && millis() - id(last_uart_read) > 2000) {
+              id(uart_text_sensor).publish_state("");
+              id(message_buffer).clear();
+              id(reset_timer) = false;
+          }
+          // Publish after 3 seconds of inactivity
+          if (!id(message_buffer).empty() && millis() - id(last_uart_read) > 3000) {
+              id(uart_text_sensor).publish_state(id(message_buffer));
+              id(message_buffer).clear();
+              id(reset_timer) = true; // Start the 2-second timer to reset the message
+          }
+
+
+text:
+  - platform: template
+    name: "SMS 收件号码"
+    id: sms_recipient
+    optimistic: true
+    min_length: 0
+    max_length: 20
+    mode: text
+
+  - platform: template
+    name: "SMS 内容"
+    id: sms_content
+    optimistic: true
+    min_length: 0
+    max_length: 300
+    mode: text
+
+button:
+  - platform: template
+    name: "发送短信"
+    on_press:
+      - uart.write: !lambda |-
+          std::string cmd = "SMS," + id(sms_recipient).state + "," + id(sms_content).state + "\n";
+          return std::vector<uint8_t>(cmd.begin(), cmd.end());
+
+switch:
+  - platform: restart
+    name: "重启"

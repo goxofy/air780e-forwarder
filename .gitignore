@@ -1,2 +1,6 @@
 .luatide
 luatide_project.json
+
+# ESPHome secrets (含真实凭据, 切勿提交)
+esphome/secrets.yaml
+secrets.yaml
