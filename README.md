@@ -54,8 +54,4 @@ cp esphome/secrets.yaml.example esphome/secrets.yaml
 # 编辑 esphome/secrets.yaml 填入真实值后，用 ESPHome 编译烧录 esphome/config.yaml
 ```
 
-## :hammer: Usage
-
-https://mizore.notion.site/Air780E-e750efe0d6cc40c3baa276eeb811d534
-
 
