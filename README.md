@@ -33,9 +33,9 @@
 
 - `esphome/config.yaml` — 设备配置：
     - UART(GPIO0 TX / GPIO1 RX, 115200) 对接 Air780E。
-    - 读取从机推送的短信，按 UTF-8 边界拼包，POST 转发到 Pushover（`#ALIVE_REPORT` 心跳不转发；内容做 JSON 转义）。
-    - 暴露三个 Home Assistant 实体用于发短信：文本 `SMS 收件号码`、文本 `SMS 内容`、按钮 `发送短信`；按钮按下后向 UART 写入 `SMS,号码,内容\n`。
-    - 所有敏感信息(WiFi、API key、OTA 密码、Pushover token/user)均通过 `!secret` / `substitutions` 引用。
+    - 读取从机推送的短信，按 UTF-8 边界拼包后发布到文本传感器 `收到的短信`（`#ALIVE_REPORT` 心跳跳过）。**ESPHome 不内置任何推送服务**，通知/转发逻辑交给 Home Assistant 自动化处理。
+    - 发短信：文本 `SMS 收件号码`、文本 `SMS 内容` + 按钮 `发送短信`；按下后向 UART 写入 `SMS,号码,内容\n`。
+    - WiFi、API key、OTA 密码通过 `!secret` 引用。
 - `esphome/secrets.yaml.example` — secrets 模板。使用时复制为 `esphome/secrets.yaml` 并填入真实值；`secrets.yaml` 已被 `.gitignore` 忽略，请勿提交。
 
 ```bash

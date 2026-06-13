@@ -1,7 +1,3 @@
-substitutions:
-  pushover_token: !secret pushover_token
-  pushover_user: !secret pushover_user
-
 esphome:
   name: air780e-sms
   friendly_name: Air780E SMS
@@ -10,7 +6,7 @@ esp32:
   board: airm2m_core_esp32c3
   framework:
     type: arduino
-  
+
 
 #logger:
 #  level: INFO
@@ -38,52 +34,11 @@ uart:
   rx_buffer_size: 256
 
 
-http_request:
-  verify_ssl: false
-  timeout: 20s  # 增加超时时间
-  useragent: "C3-Air780E"
-
+# 收到的短信暴露为文本传感器, 通知/转发逻辑交给 Home Assistant 自动化处理
 text_sensor:
   - platform: template
     name: "收到的短信"
     id: uart_text_sensor
-    on_value:
-      then:
-        - if:
-            condition:
-              lambda: 'return x != "" && x.substr(0, 13).compare("#ALIVE_REPORT") != 0;'
-            then:
-              - http_request.post:
-                  url: 'https://api.pushover.net/1/messages.json'
-                  request_headers:
-                    Content-Type: 'application/json'
-                  body: !lambda |-
-                    std::string msg = id(uart_text_sensor).state;
-                    std::string esc;
-                    for (char c : msg) {
-                      switch (c) {
-                        case '"':  esc += "\\\""; break;
-                        case '\\': esc += "\\\\"; break;
-                        case '\n': esc += "\\n";  break;
-                        case '\r': esc += "\\r";  break;
-                        case '\t': esc += "\\t";  break;
-                        default:
-                          if ((unsigned char)c < 0x20) {
-                            char buf[8];
-                            snprintf(buf, sizeof(buf), "\\u%04x", c);
-                            esc += buf;
-                          } else {
-                            esc += c;
-                          }
-                      }
-                    }
-                    return "{\"token\": \"${pushover_token}\", \"user\": \"${pushover_user}\", \"message\": \"" + esc + "\"}";
-      # Set reset timer when new value is received
-        - lambda: |-
-            if (!x.empty()) {
-              id(last_uart_read) = millis();
-              id(reset_timer) = true;
-            }
 
 # Define global variables
 globals:
@@ -101,11 +56,6 @@ globals:
     type: unsigned long
     restore_value: no
     initial_value: '0'
-
-  - id: reset_timer
-    type: bool
-    restore_value: no
-    initial_value: 'false'
 
 interval:
   - interval: 50ms
@@ -134,17 +84,13 @@ interval:
                 }
               }
           }
-          // Check for 2-second reset logic
-          if (id(reset_timer) && millis() - id(last_uart_read) > 2000) {
-              id(uart_text_sensor).publish_state("");
-              id(message_buffer).clear();
-              id(reset_timer) = false;
-          }
           // Publish after 3 seconds of inactivity
           if (!id(message_buffer).empty() && millis() - id(last_uart_read) > 3000) {
-              id(uart_text_sensor).publish_state(id(message_buffer));
+              // 跳过内部心跳 #ALIVE_REPORT, 只发布真实短信/通知
+              if (id(message_buffer).compare(0, 13, "#ALIVE_REPORT") != 0) {
+                  id(uart_text_sensor).publish_state(id(message_buffer));
+              }
               id(message_buffer).clear();
-              id(reset_timer) = true; // Start the 2-second timer to reset the message
           }
 
 
